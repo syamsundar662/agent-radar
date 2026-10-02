@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Radar</title>
+  <script>document.documentElement.dataset.theme = localStorage.getItem('agent-radar:theme') || 'midnight';</script>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%230a0c0b' stroke='%23ffb547' stroke-width='2'/><path d='M16 16 L16 3 A13 13 0 0 1 28 12 Z' fill='%23ffb547'/><circle cx='21' cy='20' r='2.5' fill='%239fbf95'/></svg>">
+  <!-- fonts load without blocking the app; canvases repaint when they arrive -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Martian+Mono:wght@300;400;500&family=Newsreader:ital,opsz,wght@1,6..72,400&display=swap" media="print" onload="this.media='all'">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="importmap">{ "imports": { "three": "/vendor/three.module.min.js" } }</script>
+</head>
+<body>
+  <header class="bar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Agent<b>Radar</b></div>
+    <div class="bar-meta">
+      <span id="host">—</span>
+      <span id="clock">--:--:--</span>
+    </div>
+    <div class="bar-actions">
+      <div class="themes" role="group" aria-label="Colour theme">
+        <span class="themes-label">Theme</span>
+        <button class="swatch" type="button" data-theme-id="midnight" title="Midnight" aria-label="Midnight theme" aria-pressed="false"></button>
+        <button class="swatch" type="button" data-theme-id="control" title="Control room" aria-label="Control room theme" aria-pressed="false"></button>
+        <button class="swatch" type="button" data-theme-id="phosphor" title="Phosphor" aria-label="Phosphor theme" aria-pressed="false"></button>
+        <button class="swatch" type="button" data-theme-id="daylight" title="Daylight" aria-label="Daylight theme" aria-pressed="false"></button>
+      </div>
+      <button id="privacy" class="toggle" aria-pressed="false" title="Blur prompts and tool details for screen sharing">Presenter mode</button>
+      <span id="link" class="link" data-state="connecting" role="status">Connecting</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="scope-wrap">
+        <canvas id="scope" aria-label="Radar of running agents: working agents sit at the centre, idle ones drift outward by time since last activity"></canvas>
+        <div id="scope-tip" class="tip" hidden></div>
+        <ul class="scope-legend">
+          <li><i class="dot busy"></i>working</li>
+          <li><i class="dot idle"></i>idle</li>
+          <li><i class="dot shell"></i>shell</li>
+          <li><i class="dot subagent"></i>subagent</li>
+          <li class="hint">distance = time since last activity</li>
+        </ul>
+      </div>
+      <div class="hero-copy">
+        <p class="eyebrow">Live telemetry · refreshed every 2s</p>
+        <h1>Every agent on this machine<em>and what each one is doing right now.</em></h1>
+        <div id="readouts" class="readouts"></div>
+      </div>
+    </section>
+
+    <section class="floor-section" aria-label="3D village: one builder per Claude session">
+      <div class="col-head">
+        <h2>The village</h2>
+        <span class="note">every builder is a live Claude session · a building gains a level per 100k tokens of work · finished conversations leave their building standing</span>
+        <div id="floor-modes" class="floor-modes" aria-live="polite"></div>
+        <button id="floor-full" class="toggle" type="button">Fullscreen</button>
+      </div>
+      <div id="floor" class="floor">
+        <div class="floor-labels"></div>
+        <p class="floor-hint">drag to orbit · pinch or ⌘-scroll to zoom · click a builder to follow it, again to open its card · esc to zoom out</p>
+        <p class="floor-fallback" hidden>The 3D village needs WebGL, which isn't available in this browser.</p>
+      </div>
+    </section>
+
+    <section id="others" class="others" aria-label="Other AI agents on this machine"></section>
+
+    <section class="deck">
+      <div>
+        <div class="col-head">
+          <h2>Claude Code sessions</h2>
+          <div class="filters" role="group" aria-label="Filter sessions">
+            <button data-filter="all" aria-pressed="true">All<b data-count="all"></b></button>
+            <button data-filter="busy" aria-pressed="false">Working<b data-count="busy"></b></button>
+            <button data-filter="idle" aria-pressed="false">Idle<b data-count="idle"></b></button>
+          </div>
+        </div>
+        <p id="empty" class="empty" hidden>No Claude Code sessions are running. Start one with <code>claude</code> in any terminal and it will appear here.</p>
+        <div id="sessions" class="sessions"></div>
+      </div>
+
+      <aside class="wire-col">
+        <div class="col-head">
+          <h2>The wire</h2>
+          <span class="note">every agent, newest first</span>
+        </div>
+        <ol id="wire" class="wire" aria-live="off"></ol>
+      </aside>
+    </section>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
