@@ -1,13 +1,43 @@
 {
   "name": "agent-radar",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Live local dashboard of the AI agents running on this machine",
+  "version": "0.2.0",
+  "description": "A live, local dashboard of the AI agents running on your machine: every Claude Code session as a radar blip, a session card and a builder in a 3D village",
   "type": "module",
+  "bin": {
+    "agent-radar": "server.mjs"
+  },
+  "files": [
+    "server.mjs",
+    "collector.mjs",
+    "village.mjs",
+    "demo.mjs",
+    "public/",
+    "docs/how-it-works.md"
+  ],
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "demo": "node server.mjs --demo --open"
   },
   "engines": {
     "node": ">=18"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "ai-agents",
+    "dashboard",
+    "monitoring",
+    "developer-tools",
+    "threejs"
+  ],
+  "author": "Syam Sundar",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/syamsundar662/agent-radar.git"
+  },
+  "homepage": "https://github.com/syamsundar662/agent-radar#readme",
+  "bugs": {
+    "url": "https://github.com/syamsundar662/agent-radar/issues"
   }
 }

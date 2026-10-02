@@ -1,6 +1,7 @@
 // Builds a point-in-time snapshot of the AI agents running on this machine:
 // Claude Code CLI sessions (from ~/.claude), their subagents, and other agent
 // processes found in the process table (Codex, Cursor, Claude Desktop, ...).
+// Works on macOS and Linux (via `ps`); Windows support (via PowerShell) is experimental.
 import { execFile } from 'node:child_process';
 import { open, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
@@ -10,7 +11,7 @@ import { promisify } from 'node:util';
 const run = promisify(execFile);
 
 const HOME = os.homedir();
-const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
+export const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
 const SESSIONS_DIR = path.join(CLAUDE_DIR, 'sessions');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 
@@ -24,13 +25,13 @@ const SUBAGENT_WINDOW_MS = 6 * 3600_000; // hide subagents untouched for longer 
 const SUBAGENT_STALL_MS = 10 * 60_000; // unfinished + no writes for this long → stalled
 const FEED_SIZE = 80;
 
-// `app` matches the full command of a desktop app's main process;
+// `app` matches the full command of a macOS desktop app's main process;
 // `bin` matches the executable name (or the script run by node/bun/python).
 const OTHER_AGENTS = [
   { id: 'claude-desktop', label: 'Claude Desktop', app: /\/Claude\.app\/Contents\/MacOS\/Claude$/ },
   { id: 'chatgpt', label: 'ChatGPT', app: /\/ChatGPT\.app\/Contents\/MacOS\/ChatGPT$/ },
-  { id: 'cursor', label: 'Cursor', app: /\/Cursor\.app\/Contents\/MacOS\/Cursor$/ },
-  { id: 'windsurf', label: 'Windsurf', app: /\/Windsurf\.app\/Contents\/MacOS\/(Windsurf|Electron)$/ },
+  { id: 'cursor', label: 'Cursor', app: /\/Cursor\.app\/Contents\/MacOS\/Cursor$/, bin: 'cursor' },
+  { id: 'windsurf', label: 'Windsurf', app: /\/Windsurf\.app\/Contents\/MacOS\/(Windsurf|Electron)$/, bin: 'windsurf' },
   { id: 'codex', label: 'Codex', bin: 'codex' },
   { id: 'claude-headless', label: 'Claude Code · headless', bin: 'claude' },
   { id: 'gemini', label: 'Gemini CLI', bin: 'gemini' },
@@ -79,8 +80,8 @@ async function collectSessions(procs, children, now) {
 async function loadSession(file, procs, children, now) {
   const meta = await readJson(file);
   if (!meta?.pid) return null;
-  const proc = procs.get(meta.pid);
   // Session files outlive crashed processes, and pids get reused.
+  const proc = procs.size ? procs.get(meta.pid) : bareProcess(meta.pid);
   if (!proc || !/claude/i.test(proc.command)) return null;
 
   const transcriptPath = meta.sessionId && meta.cwd ? await findTranscript(meta.sessionId, meta.cwd) : null;
@@ -345,7 +346,31 @@ function clean(s, max) {
 
 // ── Processes ───────────────────────────────────────────────────────────────
 
+let processWarning = null;
+
+// pid → { pid, ppid, cpu, rssKB, uptimeSec, tty, command }. Empty when the process
+// list can't be read; sessions are then checked one by one (see bareProcess).
 async function processTable() {
+  try {
+    return process.platform === 'win32' ? await windowsProcesses() : await unixProcesses();
+  } catch (err) {
+    if (processWarning !== err.message) console.warn(`Can't list processes (${err.message}); CPU and memory will show 0.`);
+    processWarning = err.message;
+    return new Map();
+  }
+}
+
+// Liveness without a process list: signal 0 checks the pid exists without touching it.
+function bareProcess(pid) {
+  try {
+    process.kill(pid, 0);
+  } catch (err) {
+    if (err.code !== 'EPERM') return null;
+  }
+  return { pid, ppid: 0, cpu: 0, rssKB: 0, uptimeSec: 0, tty: '?', command: 'claude' };
+}
+
+async function unixProcesses() {
   const { stdout } = await run('ps', ['-axo', 'pid=,ppid=,pcpu=,rss=,etime=,tty=,command='], {
     maxBuffer: 32 * 1024 * 1024,
   });
@@ -362,6 +387,24 @@ async function processTable() {
       tty: m[6],
       command: m[7],
     });
+  }
+  return procs;
+}
+
+// Windows has no `ps`; CIM gives everything but a cheap CPU %, which stays 0.
+async function windowsProcesses() {
+  const script =
+    'Get-CimInstance Win32_Process | ForEach-Object { $age = 0; if ($_.CreationDate) { $age = [int]((Get-Date) - $_.CreationDate).TotalSeconds }; ' +
+    '$cmd = $_.CommandLine; if (-not $cmd) { $cmd = $_.Name }; "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.WorkingSetSize)`t$age`t$cmd" }';
+  const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    maxBuffer: 32 * 1024 * 1024,
+    windowsHide: true,
+  });
+  const procs = new Map();
+  for (const line of stdout.split(/\r?\n/)) {
+    const [pid, ppid, bytes, age, ...command] = line.split('\t');
+    if (!/^\d+$/.test(pid ?? '')) continue;
+    procs.set(+pid, { pid: +pid, ppid: +ppid, cpu: 0, rssKB: Number(bytes) / 1024 || 0, uptimeSec: +age || 0, tty: '?', command: command.join('\t') });
   }
   return procs;
 }
@@ -408,8 +451,9 @@ function treeStats(procs, children, root) {
 
 function binaryOf(command) {
   const [first = '', second = ''] = command.split(/\s+/, 2);
-  const base = path.basename(first);
-  return /^(node|bun|python[\d.]*)$/.test(base) && second ? path.basename(second) : base;
+  const name = (p) => path.basename(p.replace(/^"|"$/g, '')).replace(/\.(exe|cmd)$/i, '');
+  const base = name(first);
+  return /^(node|bun|python[\d.]*)$/.test(base) && second ? name(second) : base;
 }
 
 const hostApp = (command) =>
@@ -420,7 +464,7 @@ function collectOthers(procs, children, sessionPids) {
   for (const p of procs.values()) {
     if (sessionPids.has(p.pid)) continue;
     const bin = binaryOf(p.command);
-    const def = OTHER_AGENTS.find((d) => (d.app ? d.app.test(p.command) : bin === d.bin));
+    const def = OTHER_AGENTS.find((d) => d.app?.test(p.command) || bin === d.bin);
     if (!def) continue;
     // Count each tree once: skip workers forked by a process of the same kind.
     const parent = procs.get(p.ppid);

@@ -1,12 +1,13 @@
 // Saved buildings: every conversation the radar sees keeps its building in the
 // village after its session closes (or /clear starts a fresh one), frozen at the
-// level it reached. Kept in data/village.json next to this file.
+// level it reached. Kept in ~/.agent-radar/village.json (or $AGENT_RADAR_DATA).
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { finalTranscript } from './collector.mjs';
 
-const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'village.json');
+export const DATA_DIR = process.env.AGENT_RADAR_DATA || path.join(os.homedir(), '.agent-radar');
+const FILE = path.join(DATA_DIR, 'village.json');
 const SAVE_DELAY_MS = 5000;
 
 let buildings = null; // id → record
@@ -76,17 +77,25 @@ export async function trackBuildings(snap) {
 // Context grows every turn, so writes are batched; a crash loses at most a few
 // seconds, and the final transcript read above covers that for closed sessions.
 function scheduleSave() {
-  saveTimer ??= setTimeout(async () => {
-    saveTimer = null;
-    const json = JSON.stringify([...buildings.values()], null, 2);
-    if (json === written) return;
-    try {
-      await mkdir(path.dirname(FILE), { recursive: true });
-      await writeFile(`${FILE}.tmp`, json);
-      await rename(`${FILE}.tmp`, FILE);
-      written = json;
-    } catch (err) {
-      console.error('saving village failed:', err);
-    }
-  }, SAVE_DELAY_MS);
+  saveTimer ??= setTimeout(save, SAVE_DELAY_MS);
+}
+
+// Writes any pending changes now (on Ctrl+C, before the process exits).
+export async function flushBuildings() {
+  clearTimeout(saveTimer);
+  if (buildings) await save();
+}
+
+async function save() {
+  saveTimer = null;
+  const json = JSON.stringify([...buildings.values()], null, 2);
+  if (json === written) return;
+  try {
+    await mkdir(DATA_DIR, { recursive: true });
+    await writeFile(`${FILE}.tmp`, json);
+    await rename(`${FILE}.tmp`, FILE);
+    written = json;
+  } catch (err) {
+    console.error('saving village failed:', err);
+  }
 }
